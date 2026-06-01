@@ -1,21 +1,32 @@
 name: Build iOS IPA
 on:
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      - name: Build Xcode Project
+        with:
+          submodules: 'recursive' # 누락된 외부 라이브러리 소스까지 전부 강제로 긁어오도록 지정
+
+      - name: Setup CocoaPods
         run: |
-          xcodebuild -workspace VoidLink.xcworkspace -scheme VoidLink -configuration Release -sdk iphoneos ALLOW_PROVISIONING_PROFILE_REQUIRED=NO ALLOW_PROVISIONING_DEVICE_REGISTRATION_REQUIRED=NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean archive -archivePath build/VoidLink.xcarchive
-      - name: Create IPA Package
+          pod repo update
+          if [ -f "Podfile" ]; then pod install; fi # 의존성 패키지가 충돌 나지 않게 임의 빌드 전 설치 유도
+
+      - name: Build Xcode Project (Force bypass sign)
+        run: |
+          xcodebuild -workspace VoidLink.xcworkspace -scheme VoidLink -configuration Release -sdk iphoneos ALLOW_PROVISIONING_PROFILE_REQUIRED=NO ALLOW_PROVISIONING_DEVICE_REGISTRATION_REQUIRED=NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO COMPILER_INDEX_STORE_ENABLE=NO clean archive -archivePath build/VoidLink.xcarchive
+
+      - name: Packaging
         run: |
           mkdir -p build/Payload
-          cp -r build/VoidLink.xcarchive/Products/Applications/*.app build/Payload/
+          cp -r build/VoidLink.xcarchive/Products/Applications/*.app build/Payload/ 2>/dev/null || cp -r build/VoidLink.xcarchive/Products/Applications/VoidLink.app build/Payload/
           cd build && zip -r VoidLink_unsigned.ipa Payload
-      - name: Upload IPA Artifact
+
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: VoidLink-Unsigned-IPA
