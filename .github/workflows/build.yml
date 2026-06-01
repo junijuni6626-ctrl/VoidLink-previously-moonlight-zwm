@@ -1,0 +1,23 @@
+name: Build iOS IPA
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Build Xcode Project
+        run: |
+          xcodebuild -workspace VoidLink.xcworkspace -scheme VoidLink -configuration Release -sdk iphoneos ALLOW_PROVISIONING_PROFILE_REQUIRED=NO ALLOW_PROVISIONING_DEVICE_REGISTRATION_REQUIRED=NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO clean archive -archivePath build/VoidLink.xcarchive
+      - name: Create IPA Package
+        run: |
+          mkdir -p build/Payload
+          cp -r build/VoidLink.xcarchive/Products/Applications/*.app build/Payload/
+          cd build && zip -r VoidLink_unsigned.ipa Payload
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoidLink-Unsigned-IPA
+          path: build/VoidLink_unsigned.ipa
+
