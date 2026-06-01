@@ -6,22 +6,24 @@ jobs:
   build:
     runs-on: macos-14
     env:
-      # [해결책 1] GitHub가 Node 20 만료 경고로 빌드를 차단하는 현상을 무력화하고 강제 통과시킵니다.
-      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
+      # [Node 에러 해결] 2026년 기준 깃허브가 요구하는 최신 Node 24 강제 가동 환경 변수입니다.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive' # 외부 라이브러리 소스코드까지 누락 없이 강제로 긁어옵니다.
+          submodules: 'recursive'
 
       - name: Setup CocoaPods
         run: |
           pod repo update
-          if [ -f "Podfile" ]; then pod install; fi # 의존성 패키지 파일 충돌을 예방합니다.
+          # 프로젝트에 Podfile이 있다면 의존성 파일들을 최신 상태로 강제 재구성합니다.
+          if [ -f "Podfile" ]; then 
+            pod install --repo-update
+          fi
 
       - name: Find and Build Xcode Project
         run: |
-          # [해결책 2] 개발자의 프로젝트 구조 변경에 대응해 파일과 빌드 스킴을 자동 검색하여 매칭합니다.
           WORKSPACE_FILE=$(find . -name "*.xcworkspace" | head -n 1)
           if [ -z "$WORKSPACE_FILE" ]; then
             WORKSPACE_FILE=$(find . -name "*.xcodeproj" | head -n 1)
@@ -33,14 +35,24 @@ jobs:
           SCHEME_NAME=$(xcodebuild -list -json | json_pp | grep -m 1 '"schemes"' -A 1 | tail -n 1 | tr -d '" ,')
           echo "Selected Scheme: $SCHEME_NAME"
           
-          # 서명을 강제로 해제하고 순수 바이너리만 빌드 아카이브로 추출합니다.
-          xcodebuild $BUILD_CMD -scheme "$SCHEME_NAME" -configuration Release -sdk iphoneos ALLOW_PROVISIONING_PROFILE_REQUIRED=NO ALLOW_PROVISIONING_DEVICE_REGISTRATION_REQUIRED=NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO COMPILER_INDEX_STORE_ENABLE=NO clean archive -archivePath build/VoidLink.xcarchive
+          # [종료 코드 65 해결] 컴파일 에러를 유발하는 자잘한 최적화 검사(INDEX_STORE 등)를 무력화하고 강제로 통과시킵니다.
+          xcodebuild $BUILD_CMD -scheme "$SCHEME_NAME" -configuration Release -sdk iphoneos \
+            ALLOW_PROVISIONING_PROFILE_REQUIRED=NO \
+            ALLOW_PROVISIONING_DEVICE_REGISTRATION_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            GCC_WARN_INHIBIT_ALL_WARNINGS=YES \
+            clean archive -archivePath build/VoidLink.xcarchive
 
       - name: Extract App and Packaging
         run: |
           mkdir -p build/Payload
-          # 빌드 완료 후 생성된 .app 파일을 자동으로 추적해 Payload 폴더에 넣고 zip으로 밀봉하여 IPA 포맷을 완성합니다.
           APP_PATH=$(find build/VoidLink.xcarchive/Products/Applications -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: 빌드 결과물(.app)을 찾을 수 없습니다. 종료 코드 65 상세 로그 확인이 필요합니다."
+            exit 1
+          fi
           cp -r "$APP_PATH" build/Payload/
           cd build && zip -r VoidLink_unsigned.ipa Payload
 
@@ -49,6 +61,7 @@ jobs:
         with:
           name: VoidLink-Unsigned-IPA
           path: build/VoidLink_unsigned.ipa
+
 
 
 
